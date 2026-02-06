@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spot It - Pro Earth Widget</title>
+    <style>
+        :root { 
+            --bg: #3d2b1f; --widget-bg: #5d4037; 
+            --card-bg: #d7ccc8; --text: #efebe9; --border: #8d6e63; 
+            --accent: #ffccbc;
+        }
+        body { 
+            background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; margin: 0; overflow: hidden;
+        }
+        .widget {
+            background: var(--widget-bg); padding: 20px; border-radius: 28px;
+            text-align: center; width: 320px; border: 2px solid var(--border);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.4); position: relative;
+        }
+        .header { display: flex; justify-content: space-between; margin-bottom: 5px; font-weight: bold; font-size: 0.9rem; }
+        
+        /* Progress Bar Timer */
+        .timer-warp { width: 100%; height: 6px; background: rgba(0,0,0,0.2); border-radius: 10px; margin-bottom: 15px; overflow: hidden; }
+        #timer-bar { width: 100%; height: 100%; background: var(--accent); transition: width 0.1s linear; }
+
+        .board { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+        .card {
+            width: 160px; height: 160px; background: var(--card-bg);
+            border-radius: 50%; position: relative; overflow: hidden;
+            border: 5px solid var(--border); cursor: crosshair;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.1);
+        }
+
+        .symbol {
+            position: absolute; user-select: none; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            width: 40px; height: 40px; 
+            transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 2;
+        }
+        
+        .symbol:hover { transform: translate(-50%, -50%) scale(1.2) !important; }
+        .score-val { color: var(--accent); font-weight: 800; }
+        
+        .game-over {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--widget-bg); border-radius: 28px;
+            display: none; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 10;
+        }
+        button {
+            background: var(--accent); border: none; padding: 10px 20px;
+            border-radius: 10px; color: var(--bg); font-weight: bold; cursor: pointer;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="widget">
+    <div class="header">
+        <span>HI: <span id="hi-score">0</span></span>
+        <span>SCORE: <span id="score" class="score-val">0</span></span>
+    </div>
+    
+    <div class="timer-warp"><div id="timer-bar"></div></div>
+
+    <div class="board">
+        <div id="card1" class="card"></div>
+        <div id="card2" class="card"></div>
+    </div>
+
+    <div id="game-over" class="game-over">
+        <h2>TIME UP!</h2>
+        <p>Your Score: <span id="final-score">0</span></p>
+        <button onclick="resetGame()">PLAY AGAIN</button>
+    </div>
+</div>
+
+<script>
+    const emojis = ["🍎", "🍌", "🌵", "💎", "🐘", "🔥", "🎸", "🚁", "🍦", "🎃", "🍀", "🌙", "🍕", "🚀", "🌈", "☀️", "🍄", "🎁", "⚽", "🍔", "🦄", "🦜", "💡", "🔑", "🚗", "🏆", "🍿", "🍩", "🐳", "🎨", "🎭"];
+    let score = 0;
+    let timeLeft = 30;
+    let timerId;
+    let currentC1, currentC2;
+
+    // Load High Score
+    let hiScore = localStorage.getItem('spotItHiScore') || 0;
+    document.getElementById('hi-score').innerText = hiScore;
+
+    function getDeck() {
+        const n = 5; let d = [];
+        for (let i = 0; i <= n; i++) {
+            let c = [0];
+            for (let j = 0; j < n; j++) c.push((j + 1) + (i * n));
+            d.push(c);
+        }
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                let c = [i + 1];
+                for (let k = 0; k < n; k++) c.push((n + 1) + n * k + (i * k + j) % n);
+                d.push(c);
+            }
+        }
+        return d;
+    }
+
+    const deck = getDeck();
+
+    function draw(id, indices) {
+        const el = document.getElementById(id);
+        el.innerHTML = '';
+        const placed = [];
+
+        indices.forEach((idx) => {
+            const s = document.createElement('div');
+            s.className = 'symbol';
+            s.innerText = emojis[idx];
+            
+            let size, x, y, tooClose, attempts = 0;
+
+            do {
+                tooClose = false;
+                size = Math.floor(Math.random() * 20) + 22;
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.random() * 55; // Keep well inside 160px card (radius 80)
+                
+                x = 80 + r * Math.cos(angle);
+                y = 80 + r * Math.sin(angle);
+
+                for (let p of placed) {
+                    const dist = Math.sqrt((x - p.x)**2 + (y - p.y)**2);
+                    if (dist < 45) { tooClose = true; break; }
+                }
+                attempts++;
+            } while (tooClose && attempts < 100);
+
+            placed.push({ x, y });
+            const rot = Math.random() * 360;
+            s.style.cssText = `left:${x}px; top:${y}px; font-size:${size}px; transform: translate(-50%, -50%) rotate(${rot}deg);`;
+
+            s.onclick = (e) => {
+                e.stopPropagation();
+                const match = currentC1.filter(v => currentC2.includes(v))[0];
+                if (idx === match) {
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    next();
+                } else {
+                    el.style.borderColor = "#ff5252";
+                    setTimeout(() => el.style.borderColor = "var(--border)", 200);
+                }
+            };
+            el.appendChild(s);
+        });
+    }
+
+    function next() {
+        let i1 = Math.floor(Math.random() * deck.length);
+        let i2 = Math.floor(Math.random() * deck.length);
+        while(i1 === i2) i2 = Math.floor(Math.random() * deck.length);
+        currentC1 = deck[i1]; currentC2 = deck[i2];
+        draw('card1', currentC1);
+        draw('card2', currentC2);
+    }
+
+    function startTimer() {
+        timerId = setInterval(() => {
+            timeLeft -= 0.1;
+            document.getElementById('timer-bar').style.width = (timeLeft / 30) * 100 + "%";
+            if (timeLeft <= 0) endGame();
+        }, 100);
+    }
+
+    function endGame() {
+        clearInterval(timerId);
+        document.getElementById('game-over').style.display = 'flex';
+        document.getElementById('final-score').innerText = score;
+        if (score > hiScore) {
+            hiScore = score;
+            localStorage.setItem('spotItHiScore', hiScore);
+            document.getElementById('hi-score').innerText = hiScore;
+        }
+    }
+
+    function resetGame() {
+        score = 0;
+        timeLeft = 30;
+        document.getElementById('score').innerText = '0';
+        document.getElementById('game-over').style.display = 'none';
+        next();
+        clearInterval(timerId);
+        startTimer();
+    }
+
+    resetGame();
+</script>
+
+</body>
+</html>
